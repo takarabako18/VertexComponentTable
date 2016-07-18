@@ -1,0 +1,2 @@
+# VertexComponentTable
+MayaLT用コンポーネントエディタ
