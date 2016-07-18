@@ -1,0 +1,1703 @@
+//作成日付：2016/04/25
+//更新履歴
+//2016/07/01	・ウェイトの軽量化ツールSkinWeightReduction.mel　を参考にウェイトの値の四捨五入機能を追加
+//              　参考：http://ost-memo.blogspot.jp/2013/09/mel.html　　（ツールのダウンロードはリンク切れですが）
+//              　UIは必要機能に合わせて変更しています
+//              ・0列非表示チェックボックスを変更するとテーブルの更新がかかるように変更
+//2016/05/30	若干コード整理
+//2016/04/25	初版作成
+//              オリジナルのソースコードは　http://bochituku.jugem.jp/?eid=1　
+//              よりお借りし、以下のような改修を加えました
+//              全般
+//                ・頂点の（座標・法線・カラー）とウェイトのツールが別々だったのを統合しタブ切り替えができるように
+//                ・複数セルを同時に変更後、undoしても一つずつセルの変更しか戻らない点を解消
+//                ・全般的な動作速度のチューニング
+//                ・その他エラー処理追加など
+//
+//              座標・法線・カラータブ
+//                ・操作用途を考慮して座標・法線・カラーを
+//                　それぞれをラジオボタンでの切り替えできるように変更
+//
+//              ウェイトタブ
+//                ・変更したセルの同じ行の数値を連動して反映
+//                ・ウェイト合計値の列追加
+//                ・選択した頂点群に全くウェイトがかかってない場合列自体を非表示にするチェックボックス追加
+//                　（実は列の幅を0にしてるだけなんですが、使い勝手には影響ないよう作ってます）
+
+
+//----------------------------------------------------------------
+// スキンリストエディタ
+//----------------------------------------------------------------
+global proc VertexComponentTable()
+{
+    
+    // window 作成
+	string $windowName		= `window -t "VertexComponentTable" -widthHeight 500 300`;
+	string $form = `formLayout`;
+	
+	global string	$tabs;
+	$tabs = `tabLayout -innerMarginWidth 10 -innerMarginHeight 10 -changeCommand "tabChangeCmd"`;
+	formLayout -edit
+	-attachForm $tabs "top"    0
+	-attachForm $tabs "left"   0
+	-attachForm $tabs "bottom" 0 
+	-attachForm $tabs "right"  0
+	$form;
+	
+	// グローバル
+	//共通で使える
+	global int		$g_creating;
+	//座標・頂点カラー・法線で使う
+	global string	$g_vertex_names1[];
+	global string	$g_table1;
+	global string	$g_radioButtonGrp1;
+	global string	$g_columnName1;
+	global string	$g_columnName2;
+	global string	$g_columnName3;
+	global string	$g_columnName4;
+	global int $g_selectType;
+	//ウェイトで使う
+	global string	$g_table2;
+	global string	$checkBox0Hidden;
+	global string	$g_joint_names[];
+	global string	$g_joint_names_per_vertex[];
+	global string	$g_vertex_names2[];
+	
+	// ウェイト四捨五入
+	global string	$g_weightSlider;
+	global string	$g_radioButtonGrp2;
+	global string   $weightReductionButton;
+	global string   $weightReductionField;
+	
+	
+	
+	// formLayout 作成
+	string $formTab1 = `formLayout`;
+
+	//ラジオぼたん　初期で座標を選択状態にしておく
+	$g_radioButtonGrp1 =
+	`radioButtonGrp -numberOfRadioButtons 3 -label1 "座標" -label2 "頂点カラー" -label3 "法線"`;
+	radioButtonGrp -edit -sl 1 $g_radioButtonGrp1;
+	radioButtonGrp -edit -changeCommand "VertexEditTableGetVertex" $g_radioButtonGrp1;
+
+
+	$g_columnName1 = "座標X";
+	$g_columnName2 = "座標Y";
+	$g_columnName3 = "座標Z";
+	$g_columnName4 = "";
+	$g_selectType = 1;
+
+
+	// スクリプトテーブルの作成
+	$g_table1				= `scriptTable -r 0
+		-c 5
+		-label 1	"名前"
+		-label 2	$g_columnName1
+		-label 3	$g_columnName2
+		-label 4	$g_columnName3
+		-label 5	$g_columnName4
+		-cellChangedCmd VertexEditTableCellChangedInternal
+		-afterCellChangedCmd VertexEditTableAfterChangedCmd
+		-selectionChangedCmd VertexEditTableSelectionChangedCmd`;
+
+	// 頂点情報の取得ボタンの作成
+	string $getButton1	= `button -label "頂点情報の取得"	-command "VertexEditTableGetVertex"`;
+
+	// リストから頂点情報の再取得ボタンの作成
+	string $regetButton1	= `button -label "リストから再取得"	-command "VertexEditTableReGetVertex"`;
+	
+	
+	
+	// レイアウト設定
+	formLayout -edit
+
+		-attachForm		$g_radioButtonGrp1    	"top"		0
+		-attachForm		$g_radioButtonGrp1		"left"		0
+		-attachNone    	$g_radioButtonGrp1		"bottom"
+		-attachForm		$g_radioButtonGrp1		"right"		0
+		
+		-attachControl  $g_table1		"top"		0 $g_radioButtonGrp1
+		-attachForm		$g_table1		"left"		0
+		-attachControl	$g_table1		"bottom"	0 $getButton1
+		-attachForm		$g_table1		"right"		0
+
+		-attachNone		$getButton1		"top"
+		-attachForm		$getButton1    	"left"		0
+		-attachForm		$getButton1    	"bottom"	0
+		-attachPosition $getButton1    	"right"		0 30
+
+		-attachNone		$regetButton1	"top"
+		-attachPosition	$regetButton1	"left"		0 70
+		-attachForm		$regetButton1	"bottom"	0
+		-attachForm		$regetButton1	"right"		0
+	$formTab1;
+	setParent ..;
+	
+	
+	
+	// formLayout 作成
+	string $formTab2	 = `formLayout`;
+	
+	//ラジオぼたん　初期で座標を選択状態にしておく
+	$g_radioButtonGrp2 =
+	`radioButtonGrp -numberOfRadioButtons 2 -label1 "テーブル" -label2 "ツール"`;
+	radioButtonGrp -edit -sl 1 $g_radioButtonGrp2;
+	radioButtonGrp -edit -changeCommand "WeightRadioButtonChanged" $g_radioButtonGrp2;
+	
+	
+	
+	// スクリプトテーブルの作成
+	$g_table2			= `scriptTable -r 0
+		-c 0
+		-multiEditEnabled 1
+		-ccc SkinWeightTableCellChangedInternal
+		-scc SkinWeightTableSelectionChangedCmd
+		-afterCellChangedCmd SkinWeightTableAfterChangedCmd`;
+
+	// 頂点情報の取得ボタンの作成
+	string $getButton2	= `button -label "頂点情報の取得"	-command "SkinWeightTableGetVertex"`;
+
+	// リストから頂点情報の再取得ボタンの作成
+	string $regetButton2	= `button -label "リストから再取得"	-command "SkinWeightTableReGetVertex"`;
+	
+	//列の全てが０なら列（ジョイント）自体をテーブルから非表示にするオプション
+	$checkBox0Hidden = `checkBox -label "0列非表示" 
+	    -annotation "選択した頂点に全くウエィトがかかってないジョイントは列自体を非表示にするオプション"
+	    -offCommand "CheckBoxChanged" -onCommand "CheckBoxChanged"`;
+	    
+	    
+	// 四捨五入UI要素
+	string $weightReductionText	= `text -label "ウェイト軽量化"
+	    -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
+	    
+	$g_weightSlider = `intSlider -min 2 -max 8 -value 4 -step 1
+	     -dragCommand "WeightReductionSliderChanged" -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
+	     
+	$weightReductionButton	= `button -label "四捨五入" -command "WeightReductionButtonPressed"
+	    -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
+	    
+	$weightReductionField	= `intField -editable false -value 4
+	    -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
+	
+	
+	intSlider   -edit -enable false $g_weightSlider;
+	button      -edit -enable false $weightReductionButton;
+	intField    -edit -enable false $weightReductionField;
+	
+	
+	formLayout -edit
+	
+	    -attachForm		$g_radioButtonGrp2		"top"		0
+		-attachForm		$g_radioButtonGrp2		"left"		0
+		-attachNone    	$g_radioButtonGrp2		"bottom"
+		-attachForm		$g_radioButtonGrp2		"right"		0
+		
+		
+		-attachControl	$g_table2		"top"		0 $g_radioButtonGrp2
+		-attachForm		$g_table2		"left"		0
+		-attachControl	$g_table2		"bottom"	0 $getButton2
+		-attachForm		$g_table2		"right"		0
+
+		-attachNone    	$getButton2		"top"       
+		-attachForm		$getButton2		"left"		0
+		-attachControl	$getButton2		"bottom"	5 $weightReductionButton
+		-attachPosition $getButton2		"right"		0 30
+
+		-attachNone	    $regetButton2	"top"       
+		-attachControl	$regetButton2	"left"		10 $getButton2
+		-attachControl	$regetButton2	"bottom"	5 $weightReductionButton
+		-attachPosition	$regetButton2	"right"		40 70
+		
+		-attachNone	    $checkBox0Hidden		"top"		
+		-attachControl	$checkBox0Hidden		"left"		20 $regetButton2
+		-attachControl  $checkBox0Hidden		"bottom"    8 $weightReductionButton
+		-attachForm		$checkBox0Hidden		"right"		0
+		
+		// 四捨五入要素
+		-attachNone	    $weightReductionText		"top"		
+		-attachForm		$weightReductionText		"left"	    10
+		-attachForm    	$weightReductionText		"bottom"	5
+		-attachPosition $weightReductionText		"right"		10 30
+		
+		-attachNone	    $g_weightSlider		"top"		
+		-attachControl	$g_weightSlider		"left"	    10 $weightReductionText
+		-attachForm    	$g_weightSlider		"bottom"	4
+		-attachPosition $g_weightSlider		"right"		10 60	
+		
+		-attachNone	    $weightReductionField		"top"		
+		-attachControl	$weightReductionField	    "left"		10 $g_weightSlider
+		-attachForm    	$weightReductionField		"bottom"	2
+		-attachPosition $weightReductionField		"right"		110 30	
+		
+		-attachNone	        $weightReductionButton		"top"		
+		-attachControl	    $weightReductionButton	    "left"		10 $weightReductionField
+		-attachForm    	    $weightReductionButton		"bottom"	0
+		-attachPosition     $weightReductionButton		"right"		10 100	
+		// 四捨五入要素ここまで
+		
+	
+		
+	$formTab2;
+	setParent ..;
+	
+	
+tabLayout -edit -tabLabel $formTab1 "座標・頂点カラー・法線" -tabLabel $formTab2 "ウェイト" $tabs;
+//tabLayout -edit -changeCommand "tabChangeCmd" $tabs;
+
+showWindow;
+}
+
+
+
+//----------------------------------------------------------------
+// シェープ名の取得(座標・頂点カラー・法線とウェイト両方で使う)
+//----------------------------------------------------------------
+global proc string getShapeName( string $objectName )
+{
+	// ローカル
+	string $list[];
+
+	// シェープ名の取得
+	$list	= `listHistory $objectName`;
+	$list	= `ls -type shape $list`;
+
+	// 無
+	if( size( $list ) == 0 ){
+		return "";
+	}
+
+	return $list[ 0 ];
+}
+//----------------------------------------------------------------
+// シェープ名の取得(座標・頂点カラー・法線とウェイト両方で使う)
+//----------------------------------------------------------------
+global proc tabChangeCmd()
+{
+	global string	$tabs;
+	
+	//フラグ初期化
+	global int		$g_creating;
+	$g_creating = 0;
+	
+	//配列の初期化
+    global int $rows[]; 
+	global int $columns[]; 
+	clear($rows);
+	clear($columns);
+	
+	int $index = `tabLayout -query -selectTabIndex $tabs`;
+	
+	if($index == 1){
+	    VertexEditTableGetVertex();
+	}else if($index == 2){
+	    SkinWeightTableGetVertex();
+	}
+}
+
+/*
+座標・頂点カラー・法線関連のメソッドここから
+
+*/
+
+//----------------------------------------------------------------
+// セルの変更時コールバックの間に挟む処理（Undo対策）
+//----------------------------------------------------------------
+global proc int VertexEditTableCellChangedInternal( int $row, int $column, string $value )
+{
+	// コールバックコマンドを打つ前の中間メソッド
+
+	global int $rows[]; // Declared as a zero element array.
+	global int $columns[]; // Declared as a zero element array.
+	global string $cellValue;
+	global string	$g_table1;
+	global int		$g_creating;
+	
+	// 作成中
+	if( $g_creating == 1 ){
+		return 1;
+	}
+	
+	
+	int $cnt = size($rows);
+	int $list[] = `scriptTable -query -selectedCells $g_table1`;
+	
+	
+	$rows[$cnt] = $row;
+	$columns[$cnt] = $column;
+	
+	//選択しているセルの情報が行、列で連続して入っている。
+	//つまり配列の長さは選択しているセルの数の2倍のはず
+	
+	//これでためたコマンドを一気にディスプレイに反映する
+	if(size($rows) * 2 == size($list)){
+	    //入れる値も配列化してたが全部同じ値なので配列化しない
+	    
+	    
+	    $cellValue = $value;
+	    VertexEditTableCellChangedRun();
+	    $cellValue = "";
+	}
+	return 1;
+}
+
+global proc VertexEditTableCellChangedRun()
+{
+    //上の関数でためたコマンドを一気に走らせてまとめた変更をundoできるようにする
+    
+    //グローバル変数
+    global int $rows[]; 
+	global int $columns[]; 
+	global string $cellValue;
+	global string	$g_table1;
+	global string	$g_vertex_names1[];
+	global int $g_selectType;
+	global int $afterReset;
+    
+    if(size($rows) == 0){
+        return;
+    }
+    
+    $afterReset = 0;
+    //明示的な0以外（他にもっとパターンはあるけどとりあえず下3桁まで）
+    if($cellValue != "0"&&$cellValue != "00"&&$cellValue != ".0"&&$cellValue != ".00"&&$cellValue != ".000"
+    &&$cellValue != "0.0"&&$cellValue != "0.00"&&$cellValue != "0.000"){
+        //変換に失敗すると0が入る
+	    if(float( $cellValue ) == 0){
+	        warning  "入力した値が数値変換できません";
+	        // 頂点情報の取得で不正値入力をリセットする
+	        $afterReset = 1;
+	        return;
+	    }
+	}
+    float $f_value = float( $cellValue );
+    //編集後頂点を選択しなおす
+	string $selectedVert[];
+    
+    //ひとまとめにする処理
+    undoInfo -openChunk;
+    
+    
+	//for文でコマンド実行
+	int $i;
+	for($i =0;$i < size($rows); $i++){
+	    int $row = $rows[$i];
+	    int $column = $columns[$i];
+	    VertexEditTableCellChangedCmd($row, $column, $f_value);
+	    
+	    
+	    //名前の欄に数値を入れた場合の処理
+	    if($column == 1){
+	        $afterReset = 1;
+	    }
+	    $selectedVert[$i] = $g_vertex_names1[ $row-1 ];
+	}
+	
+	//頂点カラーを変更するとき利用:変更する一番上のセルから取れるメッシュの頂点カラーを表示する
+    //注意：複数に渡ったメッシュを選択状態にしている場合は最初以外は反映されないので注意！
+    if ($g_selectType == 2)
+	{
+	    // インデックスに変換
+	    int $index = $rows[0] - 1;
+	    
+	    // シェイプ名を取得
+	    string $shapeName = getShapeName( $g_vertex_names1[ $index ] );
+	    if( $shapeName != "" )
+	    {
+	        // 頂点カラー表示
+	        polyColorPerVertex -cdo $shapeName;
+	    }
+	}
+	
+	//ひとまとめにする処理ここまで
+	undoInfo -closeChunk;
+	//頂点選択しなおし
+	select -replace $selectedVert;
+	
+	//配列の初期化はあとでやる
+	if($afterReset == 1){
+	    return;
+	}
+	//配列の初期化
+	clear($rows);
+	clear($columns);
+    
+
+}
+
+//----------------------------------------------------------------
+// セルの変更時コールバック
+//----------------------------------------------------------------
+global proc VertexEditTableCellChangedCmd( int $row, int $column, float $f_value  )
+{
+	// グローバル
+	global string	$g_vertex_names1[];
+	global string	$g_radioButtonGrp1;
+	global int $g_selectType;
+
+	// ローカル
+	//float $f_value;
+	// インデックスに変換
+	int $i = $row - 1;
+
+	// 名前の変更はしない
+	global string	$g_table1;
+	if( $column == 1 ){
+	    //scriptTable -edit -cellIndex $row 1 -cellValue $g_vertex_names1[ $i ] $g_table1;
+		return;
+	}
+
+	// 文字列を数値化は外でやってる
+	//$f_value = float( $value );
+
+
+
+	// 頂点を選択
+	select -r $g_vertex_names1[ $i ];
+	
+	/*
+	// シェイプ名を取得（頂点カラー表示で利用しなくなったので
+	string $shapeName = getShapeName( $g_vertex_names1[ $i ] );
+	if( $shapeName == "" ){
+		return;
+	}
+	*/
+
+	//$g_selectTypeは"頂点情報の取得"ボタンを押したタイミングで変更される
+	if($g_selectType ==1)
+	{
+	    // 頂点X
+	    if( $column == 2 ){
+	        move -x $f_value;
+	        return;
+	    }
+
+	    // 頂点Y
+	    if( $column == 3 ){
+	        move -y $f_value;
+	        return;
+	    }
+
+	    // 頂点Z
+	    if( $column == 4 ){
+	        move -z $f_value;
+	        return;
+	    }
+
+	}
+	else if ($g_selectType ==2)
+	{
+
+	    // 頂点カラー表示(数が増えると負担になってたので毎回行わないように変更)
+	    //polyColorPerVertex -cdo $shapeName;
+
+	    // 頂点カラーR
+	    if( $column == 2 ){
+	        polyColorPerVertex -r $f_value;
+	        return;
+	    }
+
+	    // 頂点カラーG
+	    if( $column == 3 ){
+	        polyColorPerVertex -g $f_value;
+	        return;
+	    }
+
+	    // 頂点カラーB
+	    if( $column == 4 ){
+	        polyColorPerVertex -b $f_value;
+	        return;
+	    }
+
+	    // 頂点カラーA
+	    if( $column == 5 ){
+	        polyColorPerVertex -a $f_value;
+	        return;
+	    }
+
+
+	}
+	else if ($g_selectType ==3)
+	{
+
+	    // 法線X
+	    if( $column == 2 ){
+	        polyNormalPerVertex -x $f_value;
+	        return;
+	    }
+
+	    // 法線Y
+	    if( $column == 3 ){
+	    	polyNormalPerVertex -y $f_value;
+	    	return;
+	    }
+
+	    // 法線Z
+	    if( $column == 4 ){
+	    	polyNormalPerVertex -z $f_value;
+	    	return;
+	    }
+	}
+
+
+	return;
+}
+
+global proc VertexEditTableAfterChangedCmd(int $row, int $column, string $value)
+{
+    //不正値が入力された場合のみ使用
+    global int $afterReset;
+    
+    if($afterReset == 0){
+        return;
+    }
+    $afterReset = 0;
+    
+    global string	$g_table1;
+    global int		$g_creating;
+    global int $rows[]; 
+    global int $columns[];
+    global string	$g_vertex_names1[];
+	
+	//更新する必要のある列の算出
+	string $verts[];
+	int $rowList[];
+	int $j = 0;
+	for($i = 0 ; $i < size($rows); $i++ ){
+	    int $row = $rows[$i];
+	    int $bool = 0;
+	    //重複を排除する
+	    for($j = 0 ; $j < size($rowList) ; $j++ )
+	    {
+	        if($rowList[$j] == $row){
+	            $bool = 1;
+	            break;
+	        }
+	    }
+	    if($bool == 0){
+	        int $cnt = size($rowList);
+	        $rowList[$cnt] = $row;
+	        $verts[$cnt] = $g_vertex_names1[$row - 1];
+	    }
+	}
+	
+	//変更のためのフラグ立て
+	$g_creating = 1;
+	scriptTable -edit -multiEditEnabled 0 $g_table1;
+	
+	SelectAndSetVertsInfo($rowList,$verts);
+	
+	$g_creating = 0;
+	scriptTable -edit -multiEditEnabled 1 $g_table1;
+    
+    //配列の初期化
+	clear($rows);
+	clear($columns);
+    
+}
+
+
+//----------------------------------------------------------------
+// リストの選択で頂点の選択を更新
+//----------------------------------------------------------------
+global proc VertexEditTableSelectionChangedCmd()
+{
+	// グローバル
+	global string	$g_table1;
+	global string	$g_vertex_names1[];
+	
+	
+	// ローカル
+	int $i;
+	int $vertex_cnt;
+	int $row;
+	
+	// 非選択
+	select -cl;
+	
+	//列選択をしている時はテーブルに表示されている全ての頂点を選択する
+	int $a[] = `scriptTable -q -selectedColumns $g_table1`;
+	int $columnCount = `size $a`;
+	if($columnCount > 0){
+	    select -replace $g_vertex_names1;
+	    return;
+	}
+	// 現在選択されているセル
+	int $selectedCells[] = `scriptTable -q -sc $g_table1`;
+	$vertex_cnt = `size $selectedCells`;
+
+	for( $i = 0 ; $i < $vertex_cnt ; $i++ ){
+
+		$row = $selectedCells[ $i ] - 1;
+
+		// 最初
+		if( $i == 0 ){
+			select -r $g_vertex_names1[ $row ];
+			$i++;
+			continue;
+		}
+		// 追加
+		//select -tgl $g_vertex_names1[ $row ];
+		select -add $g_vertex_names1[ $row ];
+		$i++;
+	}
+}
+//----------------------------------------------------------------
+// 頂点情報の取得
+//----------------------------------------------------------------
+global proc VertexEditTableGetVertex()
+{
+    
+	// グローバル
+	global string	$g_table1;
+	global string	$g_vertex_names1[];
+	global int		$g_creating;
+
+	global string	$g_radioButtonGrp1;
+	global string	$g_columnName1;
+	global string	$g_columnName2;
+	global string	$g_columnName3;
+	global string	$g_columnName4;
+	global int $g_selectType;
+
+
+	// ローカル
+	float	$v_x[];
+	float	$v_y[];
+	float	$v_z[];
+
+	float	$v_nx[];
+	float	$v_ny[];
+	float	$v_nz[];
+
+	float	$v_r[];
+	float	$v_g[];
+	float	$v_b[];
+	float	$v_a[];
+
+	// ローカル
+	int $i;
+	int $vertex_cnt;
+	
+	
+
+	// 作成中
+	$g_creating	= 1;
+
+	// 配列をクリア
+	clear $g_vertex_names1;
+
+
+	// 選択リスト
+	string $sels[]				= `polyListComponentConversion -tv`;
+	string $g_vertex_names1[]	= `filterExpand -sm 31 $sels`;
+	
+	// 列選択を外す（これで選択していると他のセルの変更がなされなくなる？ので）
+	int $s[];
+	scriptTable -edit -selectedColumns $s $g_table1;
+	//select -cl;
+
+    //ラジオボタン
+    int $number;
+	$number = `radioButtonGrp -query -select $g_radioButtonGrp1`;
+
+	if($number ==1)
+	{
+
+	    $g_columnName1 = "座標X";
+	    $g_columnName2 = "座標Y";
+	    $g_columnName3 = "座標Z";
+	    $g_columnName4 = "";
+	    scriptTable -edit -columns 5 $g_table1;
+	    scriptTable -edit -columnWidth 5 0 $g_table1;
+	    $g_selectType = 1;
+
+	}
+	else if($number ==2)
+	{
+
+	    $g_columnName1 = "R";
+	    $g_columnName2 = "G";
+	    $g_columnName3 = "B";
+	    $g_columnName4 = "A";
+	    scriptTable -edit -columns 5 $g_table1;
+	    scriptTable -edit -columnWidth 5 100 $g_table1;
+	    $g_selectType = 2;
+	}
+	else if($number ==3)
+	{
+
+	    $g_columnName1 = "法線X";
+	    $g_columnName2 = "法線Y";
+	    $g_columnName3 = "法線Z";
+	    $g_columnName4 = "";
+	    scriptTable -edit -columns 5 $g_table1;
+	    $g_selectType = 3;
+	    scriptTable -edit -columnWidth 5 0 $g_table1;
+
+	}
+	scriptTable -edit -label 2 $g_columnName1 $g_table1;
+	scriptTable -edit -label 3 $g_columnName2 $g_table1;
+	scriptTable -edit -label 4 $g_columnName3 $g_table1;
+	scriptTable -edit -label 5 $g_columnName4 $g_table1;
+
+
+
+
+	$vertex_cnt = `size $g_vertex_names1`;
+	//クリアして列を作る
+	scriptTable -edit -clearTable $g_table1;
+	scriptTable -edit -rows $vertex_cnt $g_table1;
+	
+	int $rowList[];
+	for( $i = 0 ; $i < $vertex_cnt ; $i++ ){
+	    $rowList[$i] = $i + 1;
+	}
+	
+	SelectAndSetVertsInfo($rowList,$g_vertex_names1);
+	
+	// 作成中解除
+	$g_creating	= 0;
+	
+	//グローバル変数
+    global int $rows[]; 
+	global int $columns[]; 
+	//配列の初期化
+	clear($rows);
+	clear($columns);
+}
+//----------------------------------------------------------------
+// リストから頂点情報の再取得
+//----------------------------------------------------------------
+global proc VertexEditTableReGetVertex()
+{
+	// グローバル
+	global string	$g_vertex_names1[];
+	// 非選択
+	select -cl;
+	
+	
+	//わざわざfor文でやってたのが謎：必要であれば前のバージョンの処理をコピる
+	//重かった原因の一つ
+	select -replace $g_vertex_names1;
+	
+	// 頂点情報の取得
+	VertexEditTableGetVertex();
+}
+
+global proc SelectAndSetVertsInfo(int $rowList[], string $vertexNames[])
+{
+    global string	$g_radioButtonGrp1;
+    
+    
+    int $i = 0;
+    int $number = `radioButtonGrp -query -select $g_radioButtonGrp1`;
+    int $size = size($vertexNames);
+    
+    if($number ==1)
+	{
+	    for( $i = 0 ; $i < $size ; $i++ ){
+	        SetOneVertPosition($rowList[$i],$vertexNames[$i]);
+	    }
+	    
+	}
+	else if($number ==2)
+	{
+	    for( $i = 0 ; $i < $size ; $i++ ){
+	        SetOneVertColor($rowList[$i],$vertexNames[$i]);
+	    }
+	    
+	}
+	else if($number ==3)
+	{
+	    for( $i = 0 ; $i < $size ; $i++ ){
+	        SetOneVertNormal($rowList[$i],$vertexNames[$i]);
+	    }
+	}
+}
+
+
+
+global proc SetOneVertPosition( int $row, string $vertexName ){
+    
+    global string	$g_table1;
+    
+    scriptTable -edit -cellIndex $row 1 -cellValue $vertexName $g_table1;
+    
+    float $xyz[] = `pointPosition -w $vertexName`;
+    
+    scriptTable -edit -cellIndex $row 2 -cellValue $xyz[0] $g_table1;
+	scriptTable -edit -cellIndex $row 3 -cellValue $xyz[1] $g_table1;
+	scriptTable -edit -cellIndex $row 4 -cellValue $xyz[2] $g_table1;
+}
+global proc SetOneVertColor( int $row, string $vertexName ){
+    
+    global string	$g_table1;
+    
+    scriptTable -edit -cellIndex $row 1 -cellValue $vertexName $g_table1;
+    
+    if( size( `polyColorSet -q -acs $vertexName` ) == 0 ){
+        
+        scriptTable -edit -cellIndex $row 2 -cellValue 0 $g_table1;
+	    scriptTable -edit -cellIndex $row 3 -cellValue 0 $g_table1;
+	    scriptTable -edit -cellIndex $row 4 -cellValue 0 $g_table1;
+	    scriptTable -edit -cellIndex $row 5 -cellValue 1 $g_table1;
+	    
+    }else{
+		float $rgba[] = `polyColorPerVertex -q -r -g -b -a $vertexName`;
+    
+        scriptTable -edit -cellIndex $row 2 -cellValue $rgba[0] $g_table1;
+	    scriptTable -edit -cellIndex $row 3 -cellValue $rgba[1] $g_table1;
+	    scriptTable -edit -cellIndex $row 4 -cellValue $rgba[2] $g_table1;
+	    scriptTable -edit -cellIndex $row 5 -cellValue $rgba[3] $g_table1;
+	}
+    
+}
+global proc SetOneVertNormal( int $row, string $vertexName ){
+    
+    global string	$g_table1;
+    
+    scriptTable -edit -cellIndex $row 1 -cellValue $vertexName $g_table1;
+    
+    float $n_xyz[] = `polyNormalPerVertex -q -xyz $vertexName`;
+    
+    scriptTable -edit -cellIndex $row 2 -cellValue $n_xyz[0] $g_table1;
+	scriptTable -edit -cellIndex $row 3 -cellValue $n_xyz[1] $g_table1;
+	scriptTable -edit -cellIndex $row 4 -cellValue $n_xyz[2] $g_table1;
+}
+
+
+/*
+座標・頂点カラー・法線関連のメソッドここまで
+以降はウェイト情報関連のメソッド
+
+*/
+
+
+
+
+
+
+
+
+
+
+
+/*
+
+以降はウェイト情報関連のメソッド
+
+*/
+
+//----------------------------------------------------------------
+// スキンクラスターの取得
+//----------------------------------------------------------------
+global proc string getSkinCluster( string $objectName )
+{
+	// ローカル
+	string	$list[];
+	
+	if($objectName == "" ){
+		return "";
+	}
+
+	// シェープ名の取得
+	string	$shapeName = getShapeName( $objectName );
+	if( $shapeName == "" ){
+		return "";
+	}
+
+	// スキンクラスターの取得
+	$list	= `listHistory $shapeName`;
+	$list	= `ls -type skinCluster $list`;
+
+	// 無
+	if( size( $list ) == 0 ){
+		return "";
+	}
+
+	return $list[ 0 ];
+}
+//----------------------------------------------------------------
+// ジョイントの追加
+//----------------------------------------------------------------
+proc addJoint( string $objectName, int $global_vertex_names )
+{
+	// グローバル
+	global string	$g_joint_names[];
+	global string	$g_joint_names_per_vertex[];
+
+	// ローカル
+	int		$i;
+	int		$has	= 0;
+	int		$joint_cnt;
+
+	if( $global_vertex_names == 1 ){
+		// 登録済かチェック
+		$joint_cnt	= size( $g_joint_names );
+		for( $i = 0 ; $i < $joint_cnt ; $i++ ){
+			if( $g_joint_names[ $i ] == $objectName ){
+				$has = 1;
+				break;
+			}
+		}
+
+		// 登録済
+		if( $has == 1 ){
+			return;
+		}
+
+		// 追加
+		stringArrayInsertAtIndex( $joint_cnt, $g_joint_names, $objectName );
+	}else{
+		// 登録済かチェック
+		$joint_cnt	= size( $g_joint_names_per_vertex );
+		for( $i = 0 ; $i < $joint_cnt ; $i++ ){
+			if( $g_joint_names_per_vertex[ $i ] == $objectName ){
+				$has = 1;
+				break;
+			}
+		}
+
+		// 登録済
+		if( $has == 1 ){
+			return;
+		}
+
+		// 追加
+		stringArrayInsertAtIndex( $joint_cnt, $g_joint_names_per_vertex, $objectName );
+	}
+}
+//----------------------------------------------------------------
+// ジョイントの取得
+//----------------------------------------------------------------
+proc getJoint( string $objectName, int $global_vertex_names )
+{
+	// ローカル
+	int		$i;
+	int		$cnt;
+	string	$list[];
+
+	// スキンクラスターの取得
+	string	$skinCluster = getSkinCluster( $objectName );
+	if( $skinCluster == "" ){
+		return;
+	}
+
+	// ジョイントの取得
+	string	$list[] = `listConnections -type "joint" ( $skinCluster + ".matrix" )`;
+
+	// 無
+	if( size( $list ) == 0 ){
+		return;
+	}
+
+	$cnt = `size( $list )`;
+
+	// ジョイントの追加
+	for( $i = 0 ; $i < 	$cnt ; $i++ ){
+		addJoint( $list[ $i ], $global_vertex_names );
+	}
+}
+//----------------------------------------------------------------
+// 全体のジョイントの名前からインデックスを返す
+//----------------------------------------------------------------
+proc int findJointIndex( string $jointName )
+{
+	// グローバル
+	global string	$g_joint_names[];
+
+	// ローカル
+	int	$i;
+	int	$joint_cnt;
+
+	$joint_cnt	= size( $g_joint_names );
+
+	for( $i = 0 ; $i < $joint_cnt ; $i++ ){
+		if( $g_joint_names[ $i ] == $jointName ){
+			return $i;
+		}
+	}
+
+	return -1;
+}
+
+
+//----------------------------------------------------------------
+// セルの変更時コールバック
+//----------------------------------------------------------------
+global proc int SkinWeightTableCellChangedInternal( int $row, int $column, string $value )
+{
+    global int $rows[]; // Declared as a zero element array.
+	global int $columns[]; // Declared as a zero element array.
+	global string $cellValue;
+	global string	$g_table2;
+	global string	$checkBox0Hidden;
+	global int      $hiddenColumns[];
+	global int		$g_creating;
+	
+	// 作成中
+	if( $g_creating == 1 ){
+		return 1;
+	}
+	
+	//なんで配列なんかはよくわからん・・・
+	string $nowValues[] = `scriptTable -cellIndex $row $column -query -cellValue $g_table2`;
+	
+	//チェックボックスのチェック
+	if (`checkBox -q -value $checkBox0Hidden`)
+	{
+	    //幅を0にして隠してるのは数値を入れない　＝　元と同じ数値を入れる（基本0の筈だが一応）
+	    if(intArrayContains($column, $hiddenColumns))
+	    {
+	        $value = $nowValues[0];
+	    }
+	}
+	
+	int $cnt = size($rows);
+	$rows[$cnt] = $row;
+	$columns[$cnt] = $column;
+	
+	//選択しているセルの情報が行、列で連続して入っている。
+	//つまりこの配列の長さは選択しているセルの数の2倍のはず
+	int $list[] = `scriptTable -query -selectedCells $g_table2`;
+	//ドラッグして数値を入れた際の最後のセルの処理だけ行うはず
+	//これでためたコマンドを一気にディスプレイに反映する
+	if(size($rows) * 2 == size($list)){
+	    
+	    $cellValue = $value;
+	    
+	    SkinWeightTableCellChangedRun();
+	    return 0;
+	}
+	
+	
+	return 1;
+}
+
+global proc SkinWeightTableCellChangedRun()
+{
+    //上の関数でためたコマンドを一気に走らせてまとめた変更をundoできるようにする
+    
+    //グローバル変数
+    global int $rows[]; 
+	global int $columns[]; 
+	global string $cellValue;
+	global string	$g_table2;
+	global string	$g_vertex_names2[];
+	global string	$g_joint_names[];
+	global int $afterReset; 
+	
+    
+    if(size($rows) == 0){
+        return;
+    }
+    $afterReset = 0;
+    
+    //明示的な0以外（他にもっとパターンはあるけどとりあえず下3桁まで）
+    if($cellValue != "0"&&$cellValue != "00"&&$cellValue != ".0"&&$cellValue != ".00"&&$cellValue != ".000"
+    &&$cellValue != "0.0"&&$cellValue != "0.00"&&$cellValue != "0.000"){
+        //変換に失敗すると0が入る
+	    if(float( $cellValue ) == 0){
+	        $afterReset = 1;
+	        return;
+	    }
+	}
+    float $f_value = float( $cellValue );
+    
+    //ひとまとめにする処理
+    undoInfo -openChunk;
+	//for文でコマンド実行
+	
+	int $i;
+	for($i =0;$i < size($rows); $i++){
+	    int $row = $rows[$i];
+	    int $column = $columns[$i];
+	    
+	    SkinWeightTableCellChangedCmd($row, $column, $f_value );
+	}
+	
+	//ひとまとめにする処理ここまで
+	undoInfo -closeChunk;
+	
+	ResetRowValue();
+}
+
+global proc SkinWeightTableAfterChangedCmd(int $row, int $column, string $value)
+{
+    //不正値が入力された場合のみ使用
+    global int $afterReset;
+    
+    if($afterReset == 0){
+        return;
+    }
+    $afterReset = 0;
+    warning "入力した値が数値変換できません";
+    //変更した行のリセット処理
+	ResetRowValue();
+}
+
+global proc ResetRowValue()
+{
+    
+    //現行の値から$rows[]の列をリセットする
+    
+    global string	$g_table2;
+    global int		$g_creating;
+    global int $rows[]; 
+    global int $columns[];
+    global string	$g_vertex_names2[];
+    
+    //変更のためのフラグ立て
+	$g_creating = 1;
+	scriptTable -edit -multiEditEnabled 0 $g_table2;
+	
+	//更新する必要のある列の算出
+	int $rowList[];
+	int $j = 0;
+	for($i = 0 ; $i < size($rows); $i++ ){
+	    int $row = $rows[$i];
+	    int $bool = 0;
+	    //重複を排除する
+	    for($j = 0 ; $j < size($rowList) ; $j++ )
+	    {
+	        if($rowList[$j] == $row){
+	            $bool = 1;
+	            break;
+	        }
+	    }
+	    if($bool == 0){
+	        $rowList[size($rowList)] = $row;
+	    }
+	}
+	//編集後頂点を選択しなおす
+	string $selectedVert[];
+	
+	for( $i = 0 ; $i < size($rowList) ; $i++ ){
+
+		int $row = $rowList[$i];
+
+		// １頂点の情報をセルにセット
+		SetWeightOneVertex( $row, $g_vertex_names2[$row - 1]);
+		
+		$selectedVert[$i] = $g_vertex_names2[$row - 1];
+	}
+	
+	
+	scriptTable -edit -multiEditEnabled 1 $g_table2;
+	$g_creating = 0;
+	
+	//配列の初期化
+	clear($rows);
+	clear($columns);
+	
+	select -replace $selectedVert;
+    
+}
+
+
+//----------------------------------------------------------------
+// セルの変更時コールバック(旧)
+//----------------------------------------------------------------
+global proc SkinWeightTableCellChangedCmd( int $row, int $column, float $f_value)
+{
+	// グローバル
+	global string	$g_table2;
+	global string	$g_vertex_names2[];
+	global string	$g_joint_names[];
+	global string	$g_joint_names_per_vertex[];
+	
+	// セルデータ取得
+	string $cellValues[] = `scriptTable -cellIndex $row $column -query -cellValue $g_table2`;
+
+	// セルデータが空の場合は変更しない
+	if( size( $cellValues ) == 0 ){
+		return;
+	}
+	if( $cellValues[ 0 ] == "" ){
+		return;
+	}
+
+
+	// インデックスに変換
+	int $i = $row - 1;
+	int $j = $column - 2;
+
+	// 名前の変更はしない
+	if( $column == 1 ){
+		return;
+	}
+
+
+	// 頂点を選択
+	select -r $g_vertex_names2[ $i ];
+	
+
+	// シェイプ名を取得
+	string $shapeName = getShapeName( $g_vertex_names2[ $i ] );
+	if( $shapeName == "" ){
+		return;
+	}
+
+	// スキンクラスターの取得
+	string $skinClusterName	= getSkinCluster( $g_vertex_names2[ $i ] );
+
+	// ウェイトの変更
+	skinPercent -tv $g_joint_names[ $j ] $f_value $skinClusterName $g_vertex_names2[ $i ];
+
+	return;
+}
+
+
+//----------------------------------------------------------------
+// １頂点の情報をセルにセット
+//----------------------------------------------------------------
+global proc SetWeightOneVertex( int $row, string $vertexName )
+{
+	// グローバル
+	global string	$g_table2;
+	global string	$g_joint_names_per_vertex[];
+
+	// ローカル
+	int $i;
+	
+	///*
+	string $nameValue[] = `scriptTable -cellIndex $row 1 -query -cellValue $g_table2`;
+	
+	//名前
+	scriptTable -edit -cellIndex $row 1 -cellValue $vertexName $g_table2;
+
+	// 頂点毎のジョイントをクリア
+	clear $g_joint_names_per_vertex;
+
+	// ジョイントの取得
+	getJoint( $vertexName, 0 );
+
+	// スキンクラスターの取得
+	string $skinClusterName	= getSkinCluster( $vertexName );
+
+	// ウェイトの取得
+	float $weightList[]	 = `skinPercent -q -v $skinClusterName $vertexName`;
+
+	$joint_per_vertex_cnt = size( $g_joint_names_per_vertex );
+	float $total = 0;
+
+	for( $i = 0 ; $i < $joint_per_vertex_cnt ; $i++ ){
+
+		// 全体のジョイントの名前からインデックスを返す
+		$find_joint_index = findJointIndex( $g_joint_names_per_vertex[ $i ] );
+
+		int $column = $find_joint_index + 2;
+		//現行の値と違うものだけやろうとしたけど逆に遅くなった
+	    scriptTable -edit -cellIndex $row $column -cellValue $weightList[ $i ] $g_table2;
+	    
+	    //合計表示用
+	    float $val = (float)$weightList[ $i ];
+	    $total += $val;
+	}
+	//合計表示
+	scriptTable -edit -cellIndex $row ($joint_per_vertex_cnt + 2) -cellValue $total $g_table2;
+	
+}
+
+
+
+
+//----------------------------------------------------------------
+// 頂点情報の取得
+//----------------------------------------------------------------
+global proc SkinWeightTableGetVertex()
+{
+	// グローバル
+	global string	$g_table2;
+	global string	$checkBox0Hidden;
+	global string	$g_vertex_names2[];
+	global string	$g_joint_names[];
+	global int		$g_creating;
+	global int      $hiddenColumns[];
+	// ローカル
+	int $rowList;
+	int $i;
+	int $vertex_cnt;
+	int	$joint_cnt;
+	int	$joint_per_vertex_cnt;
+	int $find_joint_index;
+	
+	
+	// 配列をクリア
+	clear $g_vertex_names2;
+	clear $g_joint_names;
+	// 選択リスト
+	string $sels[]				= `polyListComponentConversion -toVertex`;
+	string $vertex_names2[]	= `filterExpand -sm 31 $sels`;
+	
+	
+	// 頂点の情報をグローバル変数に格納
+	$vertex_cnt = `size $vertex_names2`;
+	// なにも選択していない
+	if($vertex_cnt == 0){
+	    scriptTable -edit -rows 0 $g_table2;
+	    return;
+	}
+	//最初だけチェックして確認する
+	string $str = getSkinCluster($vertex_names2[ 0 ]);
+	if($str == ""){
+	    warning  "スキニングされたオブジェクトではありません";
+	    //不正操作防止用に行削除
+	    scriptTable -edit -rows 0 $g_table2;
+	    return;
+	}
+	//チェックここまで
+	
+	
+	$g_vertex_names2 = $vertex_names2;
+	
+	// 作成中
+	$g_creating = 1;
+	
+	for( $i = 0 ; $i < $vertex_cnt ; $i++ ){
+		// ジョイントの取得
+		getJoint( $g_vertex_names2[ $i ], 1 );
+	}
+
+	// ジョイントのソート
+	$g_joint_names = `sort $g_joint_names`;
+	
+	
+	
+	//行数設定
+	scriptTable -edit -rows $vertex_cnt $g_table2;
+
+	// 列数設定（ジョイント数+名前の列 + 合計表示）
+	$joint_cnt = size( $g_joint_names );
+	scriptTable -edit -columns ( $joint_cnt + 2 ) $g_table2;
+	//名前以外の列の幅を設定する
+	for($i = 0 ; $i < $joint_cnt ; $i++)
+	{
+	    //1からカウントアップするので+1 名前の欄を飛ばすのでさらに＋1で+2を加算する
+	    int $column = $i + 2;
+	    // TODO:ここの幅は適当：ユーザー側で操作できるようにしたほうがいいかも
+	    scriptTable -edit -columnWidth $column 100 $g_table2;
+	}
+	
+	
+	
+	scriptTable -edit -multiEditEnabled 0 $g_table2;
+	
+	//一旦クリア
+	scriptTable -edit -clearTable $g_table2;
+	
+
+	// 列にジョイント名をセット
+	for( $i = 0 ; $i < $joint_cnt ; $i++ ){
+		scriptTable -edit -label ( $i + 2 ) $g_joint_names[ $i ] $g_table2;
+	}
+	scriptTable -edit -label 1 "名前" $g_table2;
+	scriptTable -edit -label ($joint_cnt+ 2 ) "合計" $g_table2;
+
+
+	// スクリプトテーブルにウェイト値をセット
+	for( $i = 0 ; $i < $vertex_cnt ; $i++ ){
+
+		int $row = $i + 1;
+		// １頂点の情報をセルにセット
+		SetWeightOneVertex( $row, $g_vertex_names2[ $i ] );
+	}
+	
+	
+	//$hiddenColumnsは毎回クリアする
+	clear($hiddenColumns);
+	//チェックボックスのチェック
+	if (`checkBox -q -value $checkBox0Hidden`)
+	{
+	    //列を調べて全てに0が入っているかチェックする
+	    string $value = "0";
+	    
+	    int $j;
+	    for($j = 0 ; $j < $joint_cnt ; $j++)
+	    {
+	        int $bool = 0;
+	        for($i = 0 ; $i < $vertex_cnt ; $i++)
+	        {
+	            //1から行のカウントアップが始まるから+1
+	            int $r = $i + 1;
+	            //+2は0ではなく1から列のカウントアップが始まるのと名前の分、列が一つずれるから
+	            int $c = $j + 2;
+	            
+	            string $nowValues[] = `scriptTable -cellIndex $r $c -query -cellValue $g_table2`;
+	            
+	            //0以外が入っている場合
+	            if(stringArrayContains($value, $nowValues) == false){
+	                $bool = 1;
+	                break;
+	            }
+	        }
+	        
+	        if($bool == 0){
+	            int $cnt = size($hiddenColumns);
+	            //+2は0ではなく1から列のカウントアップが始まるのと名前の分、列が一つずれるから
+	            $hiddenColumns[$cnt] = $j + 2;
+	        }
+	    }
+	    //全てが0の列の幅を0にして実質非表示にする
+	    for($i = 0 ; $i < size($hiddenColumns) ; $i++)
+	    {
+	        int $column = $hiddenColumns[$i];
+	        scriptTable -edit -columnWidth $column 0 $g_table2;
+	    }
+	}
+
+	// 作成解除
+	$g_creating		= 0;
+	scriptTable -edit -multiEditEnabled 1 $g_table2;
+	
+	//グローバル変数
+    global int $rows[]; 
+	global int $columns[]; 
+	//配列の初期化
+	clear($rows);
+	clear($columns);
+}
+//----------------------------------------------------------------
+// リストから頂点情報の再取得
+//----------------------------------------------------------------
+global proc SkinWeightTableReGetVertex()
+{
+	// グローバル
+	global string	$g_vertex_names2[];
+	// 非選択
+	select -cl;
+	
+	//選択をわざわざfor文でやってたのが謎：戻す必要があればであれば前のバージョンから処理をコピる
+	select -replace $g_vertex_names2;
+	
+	// 頂点情報の取得
+	SkinWeightTableGetVertex();
+	
+}
+//----------------------------------------------------------------
+// リストの選択で頂点の選択を更新
+//----------------------------------------------------------------
+global proc SkinWeightTableSelectionChangedCmd()
+{
+	// グローバル
+	global string	$g_table2;
+	global string	$g_vertex_names2[];
+
+	// ローカル
+	int $i;
+	int $vertex_cnt;
+	int $row;
+	// 非選択
+	select -cl;
+	
+	
+	//列選択をしている時はテーブルに表示されている全ての頂点を選択する
+	int $a[] = `scriptTable -q -selectedColumns $g_table2`;
+	int $columnCount = `size $a`;
+	if($columnCount > 0){
+	    select -replace $g_vertex_names2;
+	    return;
+	}
+	
+	// 現在選択されているセル
+	int $selectedCells[] = `scriptTable -q -sc $g_table2`;
+
+	$vertex_cnt = `size $selectedCells`;
+
+	for( $i = 0 ; $i < $vertex_cnt ; $i++ ){
+
+		$row	=  $selectedCells[ $i ] - 1;
+
+		// 最初
+		if( $i == 0 ){
+			select -r $g_vertex_names2[ $row ];
+			$i++;
+			continue;
+		}
+
+		// 追加
+		select -tgl $g_vertex_names2[ $row ];
+		$i++;
+	}
+}
+
+//----------------------------------------------------------------
+// 0列チェックボックスの変更
+//----------------------------------------------------------------
+global proc CheckBoxChanged()
+{
+    
+    // テーブルを再更新する
+    SkinWeightTableReGetVertex();
+    
+    // テーブルの状態だけ見て伸縮を切り替えるでも良かったが数値更新もあったほうが良さそうなので更新とした
+    // あとこれ以上処理似た処理書くの辛いので（保守の観点からいっても）
+    // TODO:不評なら更新処理は省く
+    /* 
+    global string	$checkBox0Hidden;
+	global string	$g_table2;
+	global int      $hiddenColumns[];
+	
+	
+	//チェックボックスのチェック
+	if (`checkBox -q -value $checkBox0Hidden`)
+	{
+	}
+	else
+	{
+	}
+	*/
+}
+
+//----------------------------------------------------------------
+// ラジオボタンの変更（コントロールの有効・無効化）
+//----------------------------------------------------------------
+global proc WeightRadioButtonChanged()
+{
+    global string	$g_radioButtonGrp2;
+    
+	global string	$g_table2;
+	
+	global string	$g_weightSlider;
+	global string   $weightReductionButton;
+	global string   $weightReductionField;
+	
+	int $number;
+	$number = `radioButtonGrp -query -select $g_radioButtonGrp2`;
+	if($number ==1)
+	{
+	    scriptTable -edit -enable true $g_table2;
+	    intSlider   -edit -enable false $g_weightSlider;
+	    button      -edit -enable false $weightReductionButton;
+	    intField    -edit -enable false $weightReductionField;
+	}
+	else if($number ==2)
+	{
+	    scriptTable -edit -enable false $g_table2;
+	    intSlider   -edit -enable true $g_weightSlider;
+	    button      -edit -enable true $weightReductionButton;
+	    intField    -edit -enable true $weightReductionField;
+	}
+}
+
+//----------------------------------------------------------------
+// スライダーの変更
+//----------------------------------------------------------------
+global proc WeightReductionSliderChanged()
+{
+	global string   $weightReductionField;
+	global string	$g_weightSlider;
+	// スライダーの値をフィールドに表示させる
+	int $value = `intSlider -q -v $g_weightSlider`;
+	intField -e -value $value $weightReductionField;
+}
+
+//----------------------------------------------------------------
+// 実際の四捨五入作業
+//----------------------------------------------------------------
+global proc WeightReductionButtonPressed()
+{
+    global string	$g_vertex_names2[];
+    global string	$g_weightSlider;
+    
+    int $value = `intSlider -q -v $g_weightSlider`;
+    float $digit = 1.0;
+    // 「少数第ｎ位を四捨五入」という文言なら－１する方が正しい
+    for ($i = 0; $i < $value - 1 ; $i++)
+    {
+        $digit *= 0.1;
+    }
+    
+    //変数定義
+    string $SkinClusterName;        //スキンクラスターの名称
+    string $VtxWeight[];        //頂点ウェイト名
+    string $temp[];    //一時変数
+    float $VtxWeightValue[];        //頂点ウェイト値
+    float $total;            //ウェイト合計値(検算用)
+    float $diff;                //ウェイト値差分
+    int $VtxWeightNum;
+    
+    for ( $Vtx in $g_vertex_names2 )
+    {
+        //配列のクリア
+        clear $temp;
+        clear $VtxWeight;
+        clear $VtxWeightValue;
+        
+        //オブジェクト名、スキンクラスタ名を取得
+        tokenize $Vtx "." $temp;
+        //$SkinClusterName = `findRelatedSkinCluster $temp[0]`;
+        $SkinClusterName = getSkinCluster( $temp[0] );
+        
+        //スキンクラスタのウェイト値正規化解除
+        setAttr ($SkinClusterName+".normalizeWeights") 0;
+        
+        //頂点毎のスキンウェイト値を取得
+        $VtxWeight = `skinPercent -query -t $SkinClusterName $Vtx`;
+        $VtxWeightNum = size($VtxWeight);
+        for ($i = 0; $i < $VtxWeightNum ; $i++)
+        {
+            $VtxWeightValue[$i] = `skinPercent -t $VtxWeight[$i] -q $SkinClusterName $Vtx`;
+        }
+        
+        //四捨五入処理
+        setFloatRound($VtxWeightValue, $digit);
+        
+        //四捨五入の結果、合計が1にならないの場合の対策
+        //検算
+        $total = 0.000000;
+        $diff = 0.000000;
+        for ($i= 0 ; $i < $VtxWeightNum ; $i++)
+        {
+            $total = $total +$VtxWeightValue[$i];
+        }
+        
+        //合計が１でない場合、最大のウェイト値で差分を吸収して１にする
+        if ($total != 1 )
+        {
+            $biggest = 0;
+            for ($i= 0 ; $i < $VtxWeightNum ; $i++)
+            {
+                if ($VtxWeightValue[$i] > $VtxWeightValue[$biggest])
+                {
+                    $biggest = $i;
+                }
+            }
+            $diff = 1.000000 - $total;
+            $VtxWeightValue[$biggest] = $VtxWeightValue[$biggest] +$diff;
+        }
+        //結果をウェイト値に戻す
+        for ($i= 0 ; $i < $VtxWeightNum ; $i++)
+        {
+            skinPercent -nrm false -tv $VtxWeight[ $i ] $VtxWeightValue [ $i ] $SkinClusterName $Vtx;
+        }
+        //スキンクラスタのウェイト再正規化
+        setAttr ($SkinClusterName+".normalizeWeights") 1;
+    }
+    
+    // 全部終わったら表を再取得
+    SkinWeightTableReGetVertex();
+}
+
+
+//四捨五入
+global proc float[] setFloatRound(float $fltValue[], float $fltDigit)
+{
+    if(`size $fltValue` > 0)
+    {
+        for($i=0; $i<`size $fltValue`; $i++)
+        {
+            $fltValue[$i] *= 1 / $fltDigit;
+            $fltValue[$i] = floor($fltValue[$i] + 0.5);
+            $fltValue[$i] *= $fltDigit;
+        }
+        return $fltValue;
+    }
+    /*  //問題があると一頂点ごとに表示されてうざいので外す 普通はないはず
+    else
+    {
+        warning("値がありません");
+        return $fltValue;
+    }
+    */
+}
