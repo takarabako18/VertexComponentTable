@@ -1,5 +1,7 @@
 //作成日付：2016/04/25
 //更新履歴
+//2016/07/20	・タブの変更の際テーブルをクリアするように変更
+//              ・四捨五入ツールの初期値変更
 //2016/07/16	・骨の名前の長さで列の幅が変更されるチェックボックス追加
 //              ・チェックボックスを変更でのテーブル更新に再取得しないように修正
 //2016/07/01	・ウェイトの軽量化ツールSkinWeightReduction.mel　を参考にウェイトの値の四捨五入機能を追加
@@ -178,13 +180,13 @@ global proc VertexComponentTable()
 	string $weightReductionText	= `text -label "ウェイト軽量化"
 	    -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
 	    
-	$g_weightSlider = `intSlider -min 2 -max 8 -value 4 -step 1
+	$g_weightSlider = `intSlider -min 2 -max 8 -value 2 -step 1
 	     -dragCommand "WeightReductionSliderChanged" -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
 	     
 	$weightReductionButton	= `button -label "四捨五入" -command "WeightReductionButtonPressed"
 	    -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
 	    
-	$weightReductionField	= `intField -editable false -value 4
+	$weightReductionField	= `intField -editable false -value 2
 	    -annotation "指定した小数第n位を四捨五入して端数をカットし軽量化します"`;
 	
 	
@@ -287,6 +289,12 @@ global proc string getShapeName( string $objectName )
 global proc tabChangeCmd()
 {
 	global string	$tabs;
+
+	global string	$g_table1;
+	global string	$g_vertex_names1[];
+
+	global string	$g_table2;
+	global string	$g_vertex_names2[];
 	
 	//フラグ初期化
 	global int		$g_creating;
@@ -301,9 +309,22 @@ global proc tabChangeCmd()
 	int $index = `tabLayout -query -selectTabIndex $tabs`;
 	
 	if($index == 1){
-	    VertexEditTableGetVertex();
+	    //VertexEditTableGetVertex();
+	    //クリアして列を作る
+		scriptTable -edit -clearTable $g_table1;
+		scriptTable -edit -rows 0 $g_table1;
+		// 再取得でまたでないようにクリア
+		clear $g_vertex_names1;
 	}else if($index == 2){
-	    SkinWeightTableGetVertex();
+	    //SkinWeightTableGetVertex();
+	    //クリアして列を作る
+		scriptTable -edit -clearTable $g_table2;
+		scriptTable -edit -rows 0 $g_table2;
+		scriptTable -edit -columns 0 $g_table2;
+		// 再取得でまたでないようにクリア
+		clear $g_vertex_names2;
+
+
 	}
 }
 
