@@ -927,8 +927,9 @@ global proc SetOneVertNormal( int $row, string $vertexName ){
 //----------------------------------------------------------------
 global proc string getSkinCluster( string $objectName )
 {
-	// ローカル
-	string	$list[];
+	// 保持しておく値
+	global string $RetentionSkinCluster_in_getSkinCluster;
+	global string $RetentionShapeName_in_getSkinCluster;
 	
 	if($objectName == "" ){
 		return "";
@@ -936,10 +937,26 @@ global proc string getSkinCluster( string $objectName )
 
 	// シェープ名の取得
 	string	$shapeName = getShapeName( $objectName );
+
+	// 一致していたら保持している値を返す
+	if( $shapeName == $RetentionShapeName_in_getSkinCluster)
+	{
+		return $RetentionSkinCluster_in_getSkinCluster;
+	}
+
 	if( $shapeName == "" ){
 		return "";
 	}
 
+	$RetentionShapeName_in_getSkinCluster = $shapeName;
+	$RetentionSkinCluster_in_getSkinCluster = `findRelatedSkinCluster $shapeName`;
+
+	return $RetentionSkinCluster_in_getSkinCluster;
+
+	/*  //以下でもＯＫ・速度はあまりかわらないっぽい
+
+	// ローカル
+	string	$list[];
 	// スキンクラスターの取得
 	$list	= `listHistory $shapeName`;
 	$list	= `ls -type skinCluster $list`;
@@ -950,6 +967,7 @@ global proc string getSkinCluster( string $objectName )
 	}
 
 	return $list[ 0 ];
+	*/
 }
 //----------------------------------------------------------------
 // ジョイントの追加
@@ -983,6 +1001,7 @@ proc addJoint( string $objectName, int $global_vertex_names )
 		// 追加
 		stringArrayInsertAtIndex( $joint_cnt, $g_joint_names, $objectName );
 	}else{
+		
 		// 登録済かチェック
 		$joint_cnt	= size( $g_joint_names_per_vertex );
 		for( $i = 0 ; $i < $joint_cnt ; $i++ ){
@@ -1006,6 +1025,12 @@ proc addJoint( string $objectName, int $global_vertex_names )
 //----------------------------------------------------------------
 proc getJoint( string $objectName, int $global_vertex_names )
 {
+
+	// 保持しておく値
+	global string $RetentionSkinCluster_in_getJoint0;
+	global string $RetentionSkinCluster_in_getJoint1;
+	global string	$g_joint_names[];
+	global string	$g_joint_names_per_vertex[];
 	// ローカル
 	int		$i;
 	int		$cnt;
@@ -1013,9 +1038,47 @@ proc getJoint( string $objectName, int $global_vertex_names )
 
 	// スキンクラスターの取得
 	string	$skinCluster = getSkinCluster( $objectName );
-	if( $skinCluster == "" ){
-		return;
+
+	if( $global_vertex_names == 1 )
+	{
+		// NOTE:$RetentionSkinCluster_in_getJoint1 が空文字のチェックがいるかも
+
+		if (size( $g_joint_names ) > 0)
+		{
+			if($skinCluster == $RetentionSkinCluster_in_getJoint1)
+			{
+				// 前の値と同じなら保持した値をそのまま使う
+				return;
+			}
+		}
+
+		if( $skinCluster == "" ){
+			return;
+		}
+		$RetentionSkinCluster_in_getJoint1 = $skinCluster;
 	}
+	else
+	{
+		// NOTE:$RetentionSkinCluster_in_getJoint1 が空文字のチェックがいるかも
+
+
+		if (size( $g_joint_names_per_vertex ) > 0)
+		{
+			if($skinCluster == $RetentionSkinCluster_in_getJoint0)
+			{
+				// 前の値と同じなら保持した値をそのまま使う
+				return;
+			}
+			clear $g_joint_names_per_vertex;
+		}
+
+		if( $skinCluster == "" ){
+			return;
+		}
+		$RetentionSkinCluster_in_getJoint0 = $skinCluster;
+	}
+	
+	
 
 	// ジョイントの取得
 	$list = `listConnections -type "joint" ( $skinCluster + ".matrix" )`;
@@ -1026,7 +1089,7 @@ proc getJoint( string $objectName, int $global_vertex_names )
 	}
 
 	$cnt = `size( $list )`;
-
+	
 	// ジョイントの追加
 	for( $i = 0 ; $i < 	$cnt ; $i++ ){
 		addJoint( $list[ $i ], $global_vertex_names );
@@ -1293,15 +1356,12 @@ global proc SetWeightOneVertex( int $row, string $vertexName )
 
 	// ローカル
 	int $i;
-	
-	///*
-	string $nameValue[] = `scriptTable -cellIndex $row 1 -query -cellValue $g_table2`;
-	
+
 	//名前
 	scriptTable -edit -cellIndex $row 1 -cellValue $vertexName $g_table2;
 
 	// 頂点毎のジョイントをクリア
-	clear $g_joint_names_per_vertex;
+	//clear $g_joint_names_per_vertex;
 
 	// ジョイントの取得
 	getJoint( $vertexName, 0 );
@@ -1348,6 +1408,7 @@ global proc SkinWeightTableGetVertex()
 	global string	$g_joint_names[];
 	global int		$g_creating;
 	global int      $hiddenColumns[];
+	
 	// ローカル
 	int $rowList;
 	int $i;
@@ -1355,7 +1416,6 @@ global proc SkinWeightTableGetVertex()
 	int	$joint_cnt;
 	int	$joint_per_vertex_cnt;
 	int $find_joint_index;
-	
 	
 	// 配列をクリア
 	clear $g_vertex_names2;
@@ -1444,6 +1504,12 @@ global proc SkinWeightTableGetVertex()
 	//配列の初期化
 	clear($rows);
 	clear($columns);
+
+	//取得の際にループで保持していた値を初期化
+	global string $RetentionSkinCluster_in_getJoint0;
+	global string $RetentionSkinCluster_in_getJoint1;
+	$RetentionSkinCluster_in_getJoint0 = "";
+	$RetentionSkinCluster_in_getJoint1 = "";
 }
 //----------------------------------------------------------------
 // リストから頂点情報の再取得
@@ -1744,11 +1810,4 @@ global proc float[] setFloatRound(float $fltValue[], float $fltDigit)
         }
         return $fltValue;
     }
-    /*  //問題があると一頂点ごとに表示されてうざいので外す 普通はないはず
-    else
-    {
-        warning("値がありません");
-        return $fltValue;
-    }
-    */
 }
